@@ -35,8 +35,9 @@ jobs:
         PyInstaller.__main__.run([
             '--onefile',
             '--copy-metadata', 'streamlit',
+            '--hidden-import', 'streamlit.runtime.scriptrunner.magic_funcs', # [필수] 숨겨진 모듈 강제 포함
             '--add-data', f'{st_static}{os.path.pathsep}streamlit/static',
-            '--add-data', f'app.py{os.path.pathsep}.', # [핵심] app.py 원본 파일을 내부 임시폴더에 강제 복사
+            '--add-data', f'app.py{os.path.pathsep}.',
             '--name=DaangnAnalyzer',
             'app.py'
         ])
