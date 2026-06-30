@@ -10,24 +10,39 @@ jobs:
 
     steps:
     - name: 1. 소스 코드 가져오기
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: 2. 파이썬 환경 설정
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
 
-    - name: 3. 필수 라이브러리 및 패키징 도구 설치
+    - name: 3. 필수 라이브러리 및 크롤러 패키지 설치
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller streamlit pandas pyyaml
+        pip install pyinstaller streamlit pandas pyyaml requests beautifulsoup4
 
-    - name: 4. PyInstaller로 .exe 파일 빌드
+    - name: 4. PyInstaller로 소스 파일 및 웹 자원 강제 포함하여 빌드
+      shell: python
       run: |
-        pyinstaller --onefile --copy-metadata streamlit --name=DaangnAnalyzer app.py
+        import PyInstaller.__main__
+        import streamlit
+        import os
+        
+        st_dir = os.path.dirname(streamlit.__file__)
+        st_static = os.path.join(st_dir, 'static')
+        
+        PyInstaller.__main__.run([
+            '--onefile',
+            '--copy-metadata', 'streamlit',
+            '--add-data', f'{st_static}{os.path.pathsep}streamlit/static',
+            '--add-data', f'app.py{os.path.pathsep}.', # [핵심] app.py 원본 파일을 내부 임시폴더에 강제 복사
+            '--name=DaangnAnalyzer',
+            'app.py'
+        ])
 
     - name: 5. 최종 실행파일 다운로드 링크 생성
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: Daangn-Windows-Executable
         path: dist/DaangnAnalyzer.exe
