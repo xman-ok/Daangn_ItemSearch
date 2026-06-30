@@ -1,0 +1,33 @@
+name: 자동 실행파일 생성기 (Build EXE)
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: 1. 소스 코드 가져오기
+      uses: actions/checkout@v4
+
+    - name: 2. 파이썬 환경 설정
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: 3. 필수 라이브러리 및 패키징 도구 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller streamlit pandas pyyaml
+
+    - name: 4. PyInstaller로 .exe 파일 빌드
+      run: |
+        pyinstaller --onefile --copy-metadata streamlit --name=DaangnAnalyzer app.py
+
+    - name: 5. 최종 실행파일 다운로드 링크 생성
+      uses: actions/upload-artifact@v4
+      with:
+        name: Daangn-Windows-Executable
+        path: dist/DaangnAnalyzer.exe
