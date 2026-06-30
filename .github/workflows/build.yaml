@@ -3,8 +3,8 @@ name: Build DaangnAnalyzer EXE
 on:
   push:
     branches:
-      - main  # 질문자님의 저장소 메인 브랜치명에 맞게 자동 작동
-  workflow_dispatch: # 깃허브 Actions 탭에서 수동으로 빌드 버튼을 누를 수 있게 지원
+      - main  # 사용 중이신 메인 브랜치명에 맞게 작동합니다.
+  workflow_dispatch: # 깃허브 Actions 탭에서 수동 빌드 버튼을 활성화합니다.
 
 jobs:
   build:
@@ -25,9 +25,11 @@ jobs:
         pip install pyinstaller streamlit requests beautifulsoup4 openpyxl
 
     - name: 4. EXE 파일로 빌드
-      # [핵심 교정] --collect-all streamlit 옵션을 반드시 적용하여 내부 웹 에셋 누락으로 인한 초기 즉사를 완벽 차단합니다.
+      # [최종 교정 핵심] 
+      # --add-data "app.py;." 옵션을 추가했습니다.
+      # 이 옵션이 들어가야 임시 가상 폴더 내부에 app.py 원본 파일이 복사되어 Streamlit 엔진이 정상적으로 구동됩니다.
       run: |
-        pyinstaller --onefile --collect-all streamlit -n DaangnAnalyzer app.py
+        pyinstaller --onefile --collect-all streamlit --add-data "app.py;." -n DaangnAnalyzer app.py
 
     - name: 5. 빌드된 EXE 파일 업로드 (배포)
       uses: actions/upload-artifact@v4
