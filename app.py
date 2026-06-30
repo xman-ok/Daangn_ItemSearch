@@ -1,13 +1,16 @@
 # =========================================================================
-# [교정] PyInstaller 임시 폴더(_MEIPASS) 내의 app.py 경로를 동적으로 찾는 우회 스크립트
+# [최종 교정] Streamlit의 sys.argv 조작으로 인한 중복 실행(RuntimeError) 방지 스크립트
 # =========================================================================
 import os
 import sys
 import streamlit.web.cli as stcli
 
 if __name__ == '__main__':
-    if not any("run" in arg for arg in sys.argv):
-        # 가상 환경에 풀린 진짜 app.py 텍스트 파일의 위치를 정확히 지정합니다.
+    # Streamlit이 지울 수 없는 환경 변수(RUNNING_IN_EXE)를 체크합니다.
+    if "RUNNING_IN_EXE" not in os.environ:
+        # 첫 실행 시 환경 변수를 등록하여 재실행 시 이 블록을 건너뛰게 합니다.
+        os.environ["RUNNING_IN_EXE"] = "true"
+        
         if hasattr(sys, '_MEIPASS'):
             script_path = os.path.join(sys._MEIPASS, "app.py")
         else:
@@ -17,7 +20,7 @@ if __name__ == '__main__':
         sys.exit(stcli.main())
 
 # =========================================================================
-# 실전 전국 당근마켓 실시간 크롤러 프로그램 로직
+# 여기서부터 원래 당근마켓 프로그램 로직이 시작됩니다. (이하는 기존 코드와 동일)
 # =========================================================================
 import streamlit as st
 import pandas as pd
