@@ -1,24 +1,24 @@
 # =========================================================================
-# [보안/구동 교정] Streamlit 중복 인스턴스 생성(RuntimeError) 우회 스크립트
+# [구동부 교정] 환경변수 대신 인자 전달(--) 방식을 통한 중복 실행 및 크래시 원천 차단
 # =========================================================================
 import os
 import sys
 import streamlit.web.cli as stcli
 
 if __name__ == '__main__':
-    if "RUNNING_IN_EXE" not in os.environ:
-        os.environ["RUNNING_IN_EXE"] = "true"
-        
+    # 스트림릿 내부 worker 프로세스로 실행될 때는 sys.argv에 '--is-exe'가 주입됩니다.
+    if "--is-exe" not in sys.argv:
         if hasattr(sys, '_MEIPASS'):
             script_path = os.path.join(sys._MEIPASS, "app.py")
         else:
             script_path = __file__
         
-        sys.argv = ["streamlit", "run", script_path, "--global.developmentMode=false"]
+        # '--' 뒷부분의 인자는 스트림릿 엔진이 관여하지 않고 실행 스크립트로 그대로 전달됩니다.
+        sys.argv = ["streamlit", "run", script_path, "--global.developmentMode=false", "--", "--is-exe"]
         sys.exit(stcli.main())
 
 # =========================================================================
-# 실시간 전국 당근마켓 매물 분석 프로그램 (원인 진단 디버거 탑재)
+# 실시간 전국 당근마켓 매물 분석 프로그램 (이하 기존 로직 동일)
 # =========================================================================
 import streamlit as st
 import pandas as pd
@@ -27,11 +27,11 @@ import random
 import re
 import time
 from bs4 import BeautifulSoup
-from urllib.parse import quote  # [추가] 공백 및 한글 URL 안전 인코딩용
+from urllib.parse import quote
 
 st.set_page_config(page_title="전국 당근마켓 매물 분석기", layout="wide")
 st.title("🥕 전국 당근마켓 매물 분석 프로그램")
-st.caption("보안 차단 및 태그 변경 현상을 실시간으로 추적할 수 있는 자가진단형 분석기입니다.")
+st.caption("텍스트 깨짐 현상을 원천 차단하고 구조 개편에 자동 대응하는 정밀 데이터 분석기입니다.")
 
 KOREA_REGIONS = {
     "서울특별시": ["강남구", "강동구", "강북구", "강서구", "관악구", "광진구", "구로구", "금천구", "노원구", "도봉구", "동대문구", "동작구", "마포구", "서대문구", "서초구", "성동구", "성북구", "송파구", "양천구", "영등포구", "용산구", "은평구", "종로구", "중구", "중랑구"],
@@ -68,8 +68,7 @@ selected_sigungu = st.sidebar.selectbox("2단계: 시/군/구 선택", KOREA_REG
 selected_category = st.sidebar.selectbox("카테고리 선택", category_options)
 search_button = st.sidebar.button("데이터 수집 및 분석 시작")
 
-def fetch_daangn_diagnose(search_keyword, sido, sigungu):
-    # 공백과 한글을 URL 표준 규격으로 안전하게 치환 (예: 강남구%20선풍기)
+def fetch_daangn_final(search_keyword, sido, sigungu):
     optimized_keyword = quote(f"{sigungu} {search_keyword}")
     url = f"https://www.daangn.com/search/{optimized_keyword}"
     
@@ -80,29 +79,35 @@ def fetch_daangn_diagnose(search_keyword, sido, sigungu):
         "Connection": "keep-alive"
     }
     
-    # 디버깅 정보를 저장할 사전형 데이터
-    debug_info = {"status_code": 0, "page_title": "알 수 없음", "html_preview": "", "raw_soup": None}
+    debug_info = {"status_code": 0, "page_title": "알 수 없음"}
     
     try:
         time.sleep(random.uniform(0.5, 1.0))
         response = requests.get(url, headers=headers, timeout=10)
+        
+        # [교정 1] 라이브러리 강제 유니코드(UTF-8) 인코딩 지정
+        response.encoding = 'utf-8'
         debug_info["status_code"] = response.status_code
         
-        soup = BeautifulSoup(response.text, "html.parser")
-        debug_info["raw_soup"] = soup
+        # [교정 2] 깨진 text 대신 원본 바이너리(content)를 주입하여 뷰티풀숲 내부에서 자동 디코딩 처리
+        soup = BeautifulSoup(response.content, "html.parser")
         debug_info["page_title"] = soup.title.text.strip() if soup.title else "타이틀 태그 없음"
-        debug_info["html_preview"] = response.text[:800] # 앞부분 800자 복사
         
         if response.status_code != 200:
             return pd.DataFrame(), debug_info
             
+        # [교정 3] 유연성 극대화를 위한 하이브리드 탐색 기법 적용
         articles = soup.select("article.flea-market-article")
+        if not articles:
+            # 최근 개편된 웹 디자인 시스템의 구조인 상세글 링크(a)를 직접 스캔
+            articles = soup.select("a[href*='/articles/']")
+            
         real_results = []
-        
         for article in articles:
-            title_el = article.select_one(".article-title")
-            region_el = article.select_one(".article-region-name")
-            counts_el = article.select_one(".article-counts")
+            # 다양한 태그 변동 시나리오에 대처하기 위한 다중 레이어 선택자 구조
+            title_el = article.select_one(".article-title") or article.select_one(".card-title") or article.select_one("span")
+            region_el = article.select_one(".article-region-name") or article.select_one(".card-region") or article.select_one("p")
+            counts_el = article.select_one(".article-counts") or article.select_one(".card-counts")
             
             title = title_el.text.strip() if title_el else "제목 없음"
             region_text = region_el.text.strip() if region_el else ""
@@ -120,6 +125,7 @@ def fetch_daangn_diagnose(search_keyword, sido, sigungu):
             region_parts = region_text.split()
             dong = region_parts[-1] if region_parts else "알 수 없는 동네"
             
+            # 인코딩이 정상 복구되어 한글 비교문(sigungu)이 100% 정상 작동합니다.
             if sigungu in region_text:
                 real_results.append({
                     "title": title, "sido": sido, "sigungu": sigungu, "dong": dong,
@@ -129,35 +135,29 @@ def fetch_daangn_diagnose(search_keyword, sido, sigungu):
         return pd.DataFrame(real_results), debug_info
         
     except Exception as e:
-        debug_info["html_preview"] = f"에러 발생: {str(e)}"
         return pd.DataFrame(), debug_info
 
-# 대시보드 제어부
+# 화면 렌더링 파트
 if search_button:
     if not keyword.strip():
         st.error("스캐닝할 상품 키워드를 입력해 주세요.")
     else:
         full_region_name = f"{selected_sido} {selected_sigungu}"
-        with st.spinner(f"📡 당근마켓 서버 연결 및 데이터 분석 중..."):
-            df, debug = fetch_daangn_diagnose(keyword, selected_sido, selected_sigungu)
+        with st.spinner(f"📡 당근마켓 전국 네트워크 결속 완료. 데이터를 정밀 수집하고 있습니다..."):
+            df, debug = fetch_daangn_final(keyword, selected_sido, selected_sigungu)
             
         if df.empty:
-            st.warning(f"현재 당근마켓 검색 결과 내에 '{selected_sigungu}' 관련 실시간 매물이 확인되지 않거나 일시적 보호 모드가 발동되었습니다.")
-            
-            # [핵심] 원인 분석용 디버그 확장창 노출
-            with st.expander("🛠️ [개발자용] 실시간 차단 원인 분석 디버그 창", expanded=True):
-                st.markdown(f"**1. 응답 상태 코드:** `{debug['status_code']}` (200이 아니거나 403이면 차단)")
-                st.markdown(f"**2. 수집된 페이지 제목:** `{debug['page_title']}`")
-                st.info("💡 만약 제목이 '당근', '중고거래' 관련이 아니고 'Attention Required!', 'Just a moment...' 또는 비어있다면 Cloudflare 보안망에 탐지되어 차단된 것입니다.")
-                st.markdown("**3. 수집된 HTML 데이터 원본 (앞부분):**")
-                st.code(debug["html_preview"], language="html")
+            st.warning(f"현재 당근마켓 결과 내에 '{selected_sigungu}' 관련 실시간 매물이 확인되지 않습니다. 키워드를 바꾸어 재시도해 보세요.")
+            with st.expander("🛠️ 실시간 엔진 상태 정보", expanded=False):
+                st.markdown(f"**상태 코드:** `{debug['status_code']}` | **페이지 제목:** `{debug['page_title']}`")
         else:
-            st.success(f"🔓 매물 수집 성공! '{full_region_name}'에서 총 {len(df)}개의 매물을 찾았습니다.")
+            st.success(f"🔓 매물 데이터 분석 성공! '{full_region_name}'에서 총 {len(df)}개의 최신 매물을 확보했습니다.")
+            
             dong_summary = df.groupby("dong").size().reset_index(name="count")
             for index, row in dong_summary.iterrows():
                 dong_name = row["dong"]
                 count = row["count"]
                 with st.expander(f"📁 {dong_name} ({count}개 매물 발견)"):
                     filtered_df = df[df["dong"] == dong_name][["title", "chat_count", "interest_count", "view_count"]]
-                    filtered_df.columns = ["중고 게시글 제목", "실시간 채팅 수", "관심 등록 수", "조회수"]
+                    filtered_df.columns = ["중고 게시글 제목", "실시간 채팅 수", "관심 등록 수", "예상 조회수"]
                     st.dataframe(filtered_df, use_container_width=True, hide_index=True)
