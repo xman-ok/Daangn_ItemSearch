@@ -33,11 +33,10 @@ if __name__ == '__main__':
 # 1. UI 및 타이틀 설정
 st.set_page_config(page_title="당근마켓 매물 분석기", page_icon="🥕", layout="wide")
 st.title("🥕 실시간 당근마켓 매물 분석기")
-st.write("지역과 정밀 필터 설정을 결합하여 당근마켓의 최신 중고 매물을 수집하고 분석합니다.")
 
 # 2. 사이드바 검색 및 필터 UI
 st.sidebar.header("🔍 검색 및 지역 설정")
-region = st.sidebar.text_input("1. 거래 지역 입력", value="강남구", help="특정 구나 동 이름을 입력하세요 (예: 강남구, 역삼동)")
+region = st.sidebar.text_input("1. 거래 지역 입력", value="역삼동")
 keyword = st.sidebar.text_input("2. 검색 키워드 입력", value="날개 없는 선풍기")
 
 st.sidebar.markdown("---")
@@ -46,15 +45,22 @@ only_on_sale = st.sidebar.checkbox("판매중인 매물만 보기 (예약/완료
 min_price = st.sidebar.number_input("최소 가격 (원)", min_value=0, value=5000, step=1000)
 max_price = st.sidebar.number_input("최대 가격 (원)", min_value=0, value=100000, step=5000)
 
+st.sidebar.markdown("---")
+# [추가된 디버그 모드 스위치]
+st.sidebar.header("🛠️ 개발자 도구")
+debug_mode = st.sidebar.checkbox("수신된 원본 HTML 데이터 확인하기", value=False, help="당근마켓 서버로부터 받은 날것의 데이터를 화면에 출력하고 파일로 저장합니다.")
+
 # 3. 크롤링 및 파싱 함수
-def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
+def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max, is_debug):
     combined_keyword = f"{search_region} {search_keyword}".strip()
     encoded_keyword = quote(combined_keyword)
+    
+    # URL 1: 기존 검색 URL (여기서 리다이렉트가 일어나거나 빈 구조가 올 확률이 높음)
     url = f"https://www.daangn.com/search/{encoded_keyword}"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     }
     
@@ -63,14 +69,33 @@ def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
         response.encoding = 'utf-8'
         
         if response.status_code != 200:
-            st.error(f"당근마켓 서버 연결 실패 (상태 코드: {response.status_code})")
+            st.error(f"서버 연결 실패 (상태 코드: {response.status_code})")
             return None
 
         soup = BeautifulSoup(response.content, 'html.parser')
         
+        # ==========================================================
+        # [디버깅 로직]: is_debug가 True일 때 원본 데이터를 까봅니다.
+        # ==========================================================
+        if is_debug:
+            # 1. 로컬 PC에 텍스트 파일로 전체 덤프 저장
+            with open("debug_daangn_raw_response.txt", "w", encoding="utf-8") as f:
+                f.write(soup.prettify())
+            
+            # 2. Streamlit 화면에 원본 HTML 5000자 선공개 및 상태 정보 출력
+            st.warning("⚠️ 디버그 모드 활성화: 아래는 당근마켓 서버가 응답한 실제 HTML 코드의 일부입니다. (전체 내용은 EXE 파일이 있는 폴더의 debug_daangn_raw_response.txt 파일로 저장되었습니다)")
+            st.info(f"요청 URL: {response.url}\n(응답 상태: {response.status_code})")
+            with st.expander("수신된 HTML 원본 소스 보기 (클릭하여 펼치기)"):
+                st.code(soup.prettify()[:5000], language='html')
+        # ==========================================================
+
+        # 기존 파싱 로직
         articles = soup.select("article.flea-market-article")
         if not articles:
             articles = soup.select("a[href*='/articles/']")
+            
+        if is_debug:
+            st.info(f"현재 선택자(CSS Selector)로 찾아낸 매물 덩어리(Article) 개수: {len(articles)}개")
         
         parsed_results = []
         for article in articles:
@@ -83,7 +108,6 @@ def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
                 price_str = price_el.text.strip() if price_el else "가격 미기재"
                 item_region = region_el.text.strip() if region_el else "지역 미기재"
                 
-                # [필터링 1] 가격 정수 변환
                 pure_price = 0
                 if "원" in price_str:
                     try:
@@ -91,15 +115,11 @@ def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
                     except ValueError:
                         pure_price = 0
                 
-                # [필터링 2] 지정한 가격대(5,000 ~ 100,000)를 벗어나면 제외
                 if pure_price > 0 and not (p_min <= pure_price <= p_max):
                     continue
                 
-                # [필터링 3] 판매 중 상태 (예약/완료 건 제외)
                 if is_on_sale and ("완료" in title or "예약" in title or "거래완료" in price_str):
                     continue
-                    
-                # 🚨 문제의 '지역 교차 검증 로직'은 삭제 완료! 🚨
                 
                 parsed_results.append({
                     "매물명": title,
@@ -118,15 +138,15 @@ def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
 # 4. 메인 화면 버튼 구동
 st.subheader(f"📊 실시간 수집 대기 목록: [{region if region else '전국'}] - '{keyword}'")
 
-if st.button("🔄 조건 반영하여 데이터 수집 시작", use_container_width=True):
+if st.button("🔄 데이터 수집 시작", use_container_width=True):
     if not keyword.strip():
         st.warning("검색 키워드는 필수 입력 항목입니다.")
     else:
-        with st.spinner("지정한 지역과 필터링 조건에 맞추어 당근마켓 데이터를 분석하는 중..."):
-            results = fetch_daangn_data(region, keyword, only_on_sale, min_price, max_price)
+        with st.spinner("데이터를 분석하는 중..."):
+            results = fetch_daangn_data(region, keyword, only_on_sale, min_price, max_price, debug_mode)
             
             if results:
-                st.success(f"🎉 성공적으로 조건에 부합하는 {len(results)}개의 매물 데이터를 추출했습니다!")
+                st.success(f"🎉 성공적으로 {len(results)}개의 매물 데이터를 추출했습니다!")
                 st.dataframe(results, use_container_width=True)
-            else:
-                st.info("조건과 일치하는 매물 데이터가 없거나 수집에 실패했습니다. 입력하신 설정값을 다시 확인해 주세요.")
+            elif not debug_mode: # 디버그 모드가 아닐 때만 이 안내문 출력
+                st.info("매물 데이터가 없거나 수집에 실패했습니다. (구조 변경이 의심되면 좌측 하단 '디버그 모드'를 켜서 확인해 보세요)")
