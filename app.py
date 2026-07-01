@@ -2,24 +2,18 @@ import os
 import sys
 import traceback
 
-# =========================================================================
-# [블랙박스 영역] EXE 실행 직후 발생하는 라이브러리 임포트 단계 에러 포착
-# =========================================================================
 try:
     import streamlit as st
     import streamlit.web.cli as stcli
     import requests
     from bs4 import BeautifulSoup
-    from urllib.parse import quote  # URL 인코딩용 모듈 추가
+    from urllib.parse import quote
 except Exception as e:
     with open("streamlit_init_crash_log.txt", "w", encoding="utf-8") as f:
         f.write("라이브러리 불러오기(Import) 단계에서 크래시 발생:\n")
         traceback.print_exc(file=f)
     sys.exit(1)
 
-# =========================================================================
-# [구동 관리 영역] 스트림릿 포트 충돌 및 무한 루프 방지 제어 코드
-# =========================================================================
 if __name__ == '__main__':
     try:
         if "--is-exe" not in sys.argv:
@@ -36,10 +30,6 @@ if __name__ == '__main__':
             traceback.print_exc(file=f)
         sys.exit(1)
 
-# =========================================================================
-# [비즈니스 로직 영역] 지역 및 필터 기능 + 인코딩/구조 방어 로직 결합
-# =========================================================================
-
 # 1. UI 및 타이틀 설정
 st.set_page_config(page_title="당근마켓 매물 분석기", page_icon="🥕", layout="wide")
 st.title("🥕 실시간 당근마켓 매물 분석기")
@@ -48,17 +38,16 @@ st.write("지역과 정밀 필터 설정을 결합하여 당근마켓의 최신 
 # 2. 사이드바 검색 및 필터 UI
 st.sidebar.header("🔍 검색 및 지역 설정")
 region = st.sidebar.text_input("1. 거래 지역 입력", value="강남구", help="특정 구나 동 이름을 입력하세요 (예: 강남구, 역삼동)")
-keyword = st.sidebar.text_input("2. 검색 키워드 입력", value="선풍기")
+keyword = st.sidebar.text_input("2. 검색 키워드 입력", value="날개 없는 선풍기")
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ 카테고리 및 세부 필터")
 only_on_sale = st.sidebar.checkbox("판매중인 매물만 보기 (예약/완료 제외)", value=True)
-min_price = st.sidebar.number_input("최소 가격 (원)", min_value=0, value=0, step=1000)
-max_price = st.sidebar.number_input("최대 가격 (원)", min_value=0, value=500000, step=5000)
+min_price = st.sidebar.number_input("최소 가격 (원)", min_value=0, value=5000, step=1000)
+max_price = st.sidebar.number_input("최대 가격 (원)", min_value=0, value=100000, step=5000)
 
 # 3. 크롤링 및 파싱 함수
 def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
-    # 검색어 조합 및 띄어쓰기/한글 URL 안전 인코딩
     combined_keyword = f"{search_region} {search_keyword}".strip()
     encoded_keyword = quote(combined_keyword)
     url = f"https://www.daangn.com/search/{encoded_keyword}"
@@ -71,18 +60,14 @@ def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        
-        # [교정 1] 인코딩 강제 지정: 한글 외계어(Mojibake) 깨짐 현상 원천 차단
         response.encoding = 'utf-8'
         
         if response.status_code != 200:
             st.error(f"당근마켓 서버 연결 실패 (상태 코드: {response.status_code})")
             return None
 
-        # [교정 2] response.text 대신 response.content를 넘겨 BeautifulSoup이 안전하게 디코딩하도록 처리
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # [교정 3] 하이브리드 탐색: 기존 태그가 없으면 링크 태그(a)를 긁어오는 유연한 방어 로직
         articles = soup.select("article.flea-market-article")
         if not articles:
             articles = soup.select("a[href*='/articles/']")
@@ -90,7 +75,6 @@ def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
         parsed_results = []
         for article in articles:
             try:
-                # 당근마켓 웹 구조 변동 시나리오에 대처하는 다중 레이어 선택자
                 title_el = article.select_one(".article-title") or article.select_one(".card-title") or article.select_one("span")
                 price_el = article.select_one(".article-price") or article.select_one(".card-price") or article.select_one("p.price")
                 region_el = article.select_one(".article-region-name") or article.select_one(".card-region")
@@ -99,7 +83,7 @@ def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
                 price_str = price_el.text.strip() if price_el else "가격 미기재"
                 item_region = region_el.text.strip() if region_el else "지역 미기재"
                 
-                # [필터링 1] 문자열 가격("15,000원")을 정수로 변환하여 비교
+                # [필터링 1] 가격 정수 변환
                 pure_price = 0
                 if "원" in price_str:
                     try:
@@ -107,17 +91,15 @@ def fetch_daangn_data(search_region, search_keyword, is_on_sale, p_min, p_max):
                     except ValueError:
                         pure_price = 0
                 
-                # 범위 초과 시 건너뛰기 (가격이 0원인 '나눔'은 제외 여부 판단)
+                # [필터링 2] 지정한 가격대(5,000 ~ 100,000)를 벗어나면 제외
                 if pure_price > 0 and not (p_min <= pure_price <= p_max):
                     continue
                 
-                # [필터링 2] 판매 중 상태 (예약/완료 건 제외)
+                # [필터링 3] 판매 중 상태 (예약/완료 건 제외)
                 if is_on_sale and ("완료" in title or "예약" in title or "거래완료" in price_str):
                     continue
                     
-                # [필터링 3] 한글이 정상 복구되었으므로 지역명 교차 검증 활성화
-                if search_region and search_region not in item_region:
-                    continue
+                # 🚨 문제의 '지역 교차 검증 로직'은 삭제 완료! 🚨
                 
                 parsed_results.append({
                     "매물명": title,
